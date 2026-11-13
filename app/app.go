@@ -152,7 +152,7 @@ func (a *App) loadAuth() {
 func randomID() string { b := make([]byte, 16); _, _ = rand.Read(b); return hex.EncodeToString(b) }
 
 func (a *App) saveConnection(state domain.MediaProviderConnection) error {
-	return a.store.Save(domain.Entity{ID: "connection", Plugin: PluginID, DeviceID: "account", Type: "media_provider_connection", Name: "Plex Connection", Commands: []string{"media_provider_connect", "media_provider_disconnect"}, State: state})
+	return a.store.Save(domain.Entity{ID: "connection", Plugin: PluginID, DeviceID: "account", Type: "media_provider_connection", Name: "Plex Connection", Commands: []string{"media_provider_connect", "media_provider_disconnect"}, State: state, Status: connectionHealth(state)})
 }
 
 func (a *App) connect() {
@@ -275,8 +275,8 @@ func chooseConnection(ctx context.Context, r plex.Resource, auth authData) strin
 
 func (a *App) syncServer(ctx context.Context, s *plexServer) {
 	now := time.Now().UTC()
-	_ = a.store.Save(domain.Device{ID: s.ID, Plugin: PluginID, Name: s.Resource.Name})
-	_ = a.store.Save(domain.Entity{ID: "server", Plugin: PluginID, DeviceID: s.ID, Type: "media_server", Name: s.Resource.Name, State: domain.MediaServer{Connected: true, Name: s.Resource.Name, Version: s.Resource.ProductVersion, Owned: s.Resource.Owned, LastSyncAt: &now}})
+	_ = a.store.Save(a.healthyDevice(domain.Device{ID: s.ID, Plugin: PluginID, Name: s.Resource.Name}))
+	_ = a.store.Save(a.healthyEntity(domain.Entity{ID: "server", Plugin: PluginID, DeviceID: s.ID, Type: "media_server", Name: s.Resource.Name, State: domain.MediaServer{Connected: true, Name: s.Resource.Name, Version: s.Resource.ProductVersion, Owned: s.Resource.Owned, LastSyncAt: &now}}))
 	a.syncLibraries(ctx, s, now)
 	a.syncClients(ctx, s)
 	a.syncSessions(ctx, s)
