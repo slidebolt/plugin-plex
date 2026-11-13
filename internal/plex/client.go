@@ -268,10 +268,11 @@ type Grabs struct {
 	MediaGrabOperation []Grab `json:"MediaGrabOperation"`
 }
 type Template struct {
-	Parameters string    `json:"parameters"`
-	Type       int       `json:"type"`
-	Title      string    `json:"title"`
-	Setting    []Setting `json:"Setting"`
+	Parameters             string    `json:"parameters"`
+	Type                   int       `json:"type"`
+	TargetLibrarySectionID int       `json:"targetLibrarySectionID"`
+	Title                  string    `json:"title"`
+	Setting                []Setting `json:"Setting"`
 }
 type Templates struct {
 	SubscriptionTemplate []struct {

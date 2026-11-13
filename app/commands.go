@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/slidebolt/plugin-plex/internal/plex"
 	domain "github.com/slidebolt/sb-domain"
 	messenger "github.com/slidebolt/sb-messenger-sdk"
 )
@@ -74,19 +76,41 @@ func (a *App) recordAiring(serverID, airingID string, series, newOnly bool) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
 	defer cancel()
-	q := url.Values{"guid": {guid}, "type": {"4"}, "prefs[oneShot]": {"1"}}
+	var templates plex.Container[plex.Templates]
+	if err := s.Client.Get(ctx, "/media/subscriptions/template", url.Values{"guid": {guid}}, &templates); err != nil {
+		log.Printf("plugin-plex: load recording template: %v", err)
+		return
+	}
+	wantedType := 4
 	if series {
-		q.Set("type", "2")
-		q.Set("prefs[oneShot]", "0")
+		wantedType = 2
 	}
-	if newOnly {
-		q.Set("prefs[newAiringsOnly]", "1")
+	var selected *plex.Template
+	for _, group := range templates.MediaContainer.SubscriptionTemplate {
+		for i := range group.MediaSubscription {
+			if group.MediaSubscription[i].Type == wantedType {
+				candidate := group.MediaSubscription[i]
+				selected = &candidate
+				break
+			}
+		}
 	}
-	if record.Metadata.RatingKey != "" {
-		q.Set("metadataItemID", record.Metadata.RatingKey)
+	if selected == nil {
+		log.Printf("plugin-plex: no recording template type %d", wantedType)
+		return
 	}
-	if airingID != "" {
-		q.Set("airingID", airingID)
+	q, err := url.ParseQuery(selected.Parameters)
+	if err != nil {
+		log.Printf("plugin-plex: parse recording template: %v", err)
+		return
+	}
+	q.Set("type", strconv.Itoa(selected.Type))
+	q.Set("targetLibrarySectionID", strconv.Itoa(selected.TargetLibrarySectionID))
+	for _, setting := range selected.Setting {
+		q.Set("prefs["+setting.ID+"]", fmt.Sprint(setting.Value))
+	}
+	if series && newOnly {
+		q.Set("prefs[onlyNewAirings]", "1")
 	}
 	if err := s.Client.Post(ctx, "/media/subscriptions", q, nil); err != nil {
 		log.Printf("plugin-plex: create recording: %v", err)
