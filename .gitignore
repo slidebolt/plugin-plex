@@ -1,0 +1,6 @@
+/.env
+/.env.local
+/.testlogs/
+/plugin-plex
+*.test
+*.out

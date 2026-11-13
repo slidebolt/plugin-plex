@@ -1,0 +1,162 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/slidebolt/plugin-plex/internal/plex"
+	domain "github.com/slidebolt/sb-domain"
+	media "github.com/slidebolt/sb-media-sdk"
+)
+
+func (a *App) server(id string) *plexServer { a.mu.RLock(); defer a.mu.RUnlock(); return a.servers[id] }
+
+func (a *App) Browse(req media.CatalogRequest) media.CatalogPage {
+	s := a.server(req.ServerID)
+	if s == nil {
+		return media.CatalogPage{Error: "media server not found"}
+	}
+	path := "/library/sections/" + url.PathEscape(req.LibraryID) + "/all"
+	if req.ItemID != "" {
+		decoded, err := plex.DecodeID(req.ItemID)
+		if err != nil {
+			return media.CatalogPage{Error: "invalid item ID"}
+		}
+		path = "/library/metadata/" + url.PathEscape(decoded)
+	}
+	limit := req.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	offset, _ := strconv.Atoi(req.Cursor)
+	q := url.Values{"X-Plex-Container-Start": {strconv.Itoa(offset)}, "X-Plex-Container-Size": {strconv.Itoa(limit)}}
+	if req.Query != "" {
+		q.Set("title", req.Query)
+	}
+	if req.Kind != "" {
+		q.Set("type", req.Kind)
+	}
+	var result plex.Container[plex.MetadataPage]
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	if err := s.Client.Get(ctx, path, q, &result); err != nil {
+		return media.CatalogPage{Error: err.Error()}
+	}
+	items := make([]media.MediaItem, 0, len(result.MediaContainer.Metadata))
+	for _, m := range result.MediaContainer.Metadata {
+		items = append(items, mediaItem(s.ID, req.LibraryID, m))
+	}
+	total := result.MediaContainer.TotalSize
+	if total == 0 {
+		total = result.MediaContainer.Size
+	}
+	next := ""
+	if offset+len(items) < total {
+		next = strconv.Itoa(offset + len(items))
+	}
+	return media.CatalogPage{Items: items, NextCursor: next, Total: total}
+}
+
+func mediaItem(serverID, libraryID string, m plex.LibraryMetadata) media.MediaItem {
+	itemID := m.RatingKey
+	if itemID == "" {
+		itemID = strings.TrimPrefix(m.Key, "/library/metadata/")
+	}
+	ref := domain.MediaItemRef{Provider: PluginID, ServerID: serverID, LibraryID: libraryID, ItemID: plex.EncodeID(itemID)}
+	var parent *domain.MediaItemRef
+	if m.ParentRatingKey != "" {
+		p := domain.MediaItemRef{Provider: PluginID, ServerID: serverID, LibraryID: libraryID, ItemID: plex.EncodeID(m.ParentRatingKey)}
+		parent = &p
+	}
+	return media.MediaItem{Ref: ref, Kind: m.Type, Title: m.Title, SortTitle: m.SortTitle, Summary: m.Summary, Year: m.Year, DurationMS: m.Duration, Parent: parent, ParentTitle: firstNonempty(m.ParentTitle, m.GrandparentTitle), Season: m.ParentIndex, Episode: m.Index, Playable: m.Type != "show" && m.Type != "season" && m.Type != "artist" && m.Type != "album", HasThumbnail: m.Thumb != "", HasArt: m.Art != ""}
+}
+
+func (a *App) Artwork(req media.ArtworkRequest) media.ArtworkReply {
+	s := a.server(req.ServerID)
+	if s == nil {
+		return media.ArtworkReply{Error: "media server not found"}
+	}
+	id, err := plex.DecodeID(req.ItemID)
+	if err != nil {
+		return media.ArtworkReply{Error: "invalid item ID"}
+	}
+	var result plex.Container[plex.MetadataPage]
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	if err := s.Client.Get(ctx, "/library/metadata/"+url.PathEscape(id), nil, &result); err != nil || len(result.MediaContainer.Metadata) == 0 {
+		if err == nil {
+			err = fmt.Errorf("media item not found")
+		}
+		return media.ArtworkReply{Error: err.Error()}
+	}
+	m := result.MediaContainer.Metadata[0]
+	path := m.Thumb
+	if req.Kind == "art" {
+		path = m.Art
+	}
+	if path == "" {
+		return media.ArtworkReply{Error: "artwork not available"}
+	}
+	b, contentType, err := s.Client.Bytes(ctx, path)
+	if err != nil {
+		return media.ArtworkReply{Error: err.Error()}
+	}
+	return media.ArtworkReply{Data: b, ContentType: contentType}
+}
+
+func (a *App) Guide(req media.GuideRequest) media.GuidePage {
+	s := a.server(req.ServerID)
+	if s == nil {
+		return media.GuidePage{Error: "media server not found"}
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	channels := make([]media.GuideChannel, 0, len(s.Channels))
+	programs := []domain.TVProgram{}
+	for id, ch := range s.Channels {
+		if req.Channel != "" && req.Channel != ch.VCN && req.Channel != id {
+			continue
+		}
+		state := channelState(ch, s.Programs[id], time.Now(), s.GuideAt)
+		channels = append(channels, media.GuideChannel{ID: id, State: state})
+		for _, p := range s.Programs[id] {
+			if (!req.Start.IsZero() && !p.EndsAt.After(req.Start)) || (!req.End.IsZero() && !p.StartsAt.Before(req.End)) || (req.Query != "" && !strings.Contains(strings.ToLower(p.Title+" "+p.EpisodeTitle), strings.ToLower(req.Query))) {
+				continue
+			}
+			programs = append(programs, p)
+		}
+	}
+	sort.Slice(channels, func(i, j int) bool { return channels[i].State.Number < channels[j].State.Number })
+	sort.Slice(programs, func(i, j int) bool { return programs[i].StartsAt.Before(programs[j].StartsAt) })
+	offset, _ := strconv.Atoi(req.Cursor)
+	limit := req.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	if offset > len(programs) {
+		offset = len(programs)
+	}
+	end := offset + limit
+	if end > len(programs) {
+		end = len(programs)
+	}
+	next := ""
+	if end < len(programs) {
+		next = strconv.Itoa(end)
+	}
+	return media.GuidePage{Channels: channels, Programs: programs[offset:end], NextCursor: next}
+}
+
+func firstNonempty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
