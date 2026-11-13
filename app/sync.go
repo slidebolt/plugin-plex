@@ -19,7 +19,7 @@ func (a *App) syncLibraries(ctx context.Context, s *plexServer, now time.Time) {
 	}
 	for _, section := range result.MediaContainer.Directory {
 		s.Libraries[section.Key] = section
-		_ = a.store.Save(domain.Entity{ID: "library-" + safeID(section.Key), Plugin: PluginID, DeviceID: s.ID, Type: "media_library", Name: section.Title, State: domain.MediaLibrary{ServerID: s.ID, Kind: section.Type, CanBrowse: true, CanSearch: true, UpdatedAt: &now}})
+		_ = a.store.Save(domain.Entity{ID: "library-" + safeID(section.Key), Plugin: PluginID, DeviceID: s.ID, Type: "media_library", Name: section.Title, State: domain.MediaLibrary{ServerID: s.ID, LibraryID: section.Key, Kind: section.Type, CanBrowse: true, CanSearch: true, UpdatedAt: &now}})
 	}
 }
 
