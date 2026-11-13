@@ -54,3 +54,14 @@ func TestEncodedIDsRoundTrip(t *testing.T) {
 		t.Fatalf("round trip = %q, %v", decoded, err)
 	}
 }
+
+func TestDVRDistinguishesLineupStringFromLineupArray(t *testing.T) {
+	var result Container[DVRs]
+	raw := []byte(`{"MediaContainer":{"Dvr":[{"key":"2","lineup":"lineup://example","Lineup":[{"key":"enabled"}]}]}}`)
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if got := result.MediaContainer.Dvr[0]; got.Lineup != "lineup://example" || len(got.Lineups) != 1 {
+		t.Fatalf("DVR = %#v", got)
+	}
+}

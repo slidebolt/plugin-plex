@@ -207,10 +207,11 @@ type Sessions struct {
 	Metadata []Session `json:"Metadata"`
 }
 type DVR struct {
-	Key      string `json:"key"`
-	UUID     string `json:"uuid"`
-	Lineup   string `json:"lineup"`
-	Language string `json:"language"`
+	Key      string            `json:"key"`
+	UUID     string            `json:"uuid"`
+	Lineup   string            `json:"lineup"`
+	Lineups  []json.RawMessage `json:"Lineup"`
+	Language string            `json:"language"`
 }
 type DVRs struct {
 	Dvr []DVR `json:"Dvr"`
