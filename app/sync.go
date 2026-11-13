@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log"
 	"net/url"
 	"strconv"
 	"strings"
@@ -55,7 +56,12 @@ func (a *App) syncSessions(ctx context.Context, s *plexServer) {
 
 func (a *App) syncDVR(ctx context.Context, s *plexServer, now time.Time) {
 	var dvrs plex.Container[plex.DVRs]
-	if err := s.Client.Get(ctx, "/livetv/dvrs", nil, &dvrs); err != nil || len(dvrs.MediaContainer.Dvr) == 0 {
+	if err := s.Client.Get(ctx, "/livetv/dvrs", nil, &dvrs); err != nil {
+		log.Printf("plugin-plex: sync DVRs for %s: %v", s.ID, err)
+		return
+	}
+	if len(dvrs.MediaContainer.Dvr) == 0 {
+		log.Printf("plugin-plex: server %s has no DVR", s.ID)
 		return
 	}
 	var providers plex.Container[plex.Providers]
@@ -68,12 +74,15 @@ func (a *App) syncDVR(ctx context.Context, s *plexServer, now time.Time) {
 		}
 	}
 	if s.ProviderPath == "" {
+		log.Printf("plugin-plex: server %s DVR has no EPG provider", s.ID)
 		return
 	}
 	var channels plex.Container[plex.Channels]
 	if err := s.Client.Get(ctx, s.ProviderPath+"/lineups/dvr/channels", nil, &channels); err != nil {
+		log.Printf("plugin-plex: sync DVR channels for %s: %v", s.ID, err)
 		return
 	}
+	log.Printf("plugin-plex: discovered %d DVR channels on %s", len(channels.MediaContainer.Channel), s.ID)
 	for _, ch := range channels.MediaContainer.Channel {
 		id := ch.GridKey
 		if id == "" {
@@ -128,6 +137,7 @@ func (a *App) loadGuide(ctx context.Context, s *plexServer, now time.Time) {
 		_ = ch
 	}
 	s.Programs, s.Airings, s.GuideAt = programs, airings, now
+	log.Printf("plugin-plex: loaded %d guide airings on %s", len(airings), s.ID)
 }
 
 func tvProgram(serverID string, m plex.LibraryMetadata, airing plex.Airing) domain.TVProgram {
