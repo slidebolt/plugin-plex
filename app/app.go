@@ -130,11 +130,15 @@ func (a *App) loop() {
 }
 
 func (a *App) ensureAccount() error {
-	device := domain.Device{ID: "account", Plugin: PluginID, Name: "Plex Account"}
+	device := accountDevice()
 	if err := a.store.Save(device); err != nil {
 		return err
 	}
 	return a.saveConnection(domain.MediaProviderConnection{Status: "disconnected"})
+}
+
+func accountDevice() domain.Device {
+	return domain.Device{ID: "account", Plugin: PluginID, Name: "Plex Account", Entities: []domain.Entity{}}
 }
 
 func (a *App) loadAuth() {

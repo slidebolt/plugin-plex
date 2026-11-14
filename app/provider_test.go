@@ -29,3 +29,10 @@ func TestChannelStateSelectsCurrentAndNext(t *testing.T) {
 		t.Fatalf("state = %#v", state)
 	}
 }
+
+func TestAccountDeviceHasEmptyEntityArray(t *testing.T) {
+	device := accountDevice()
+	if device.Entities == nil {
+		t.Fatal("account device entities must serialize as an empty array")
+	}
+}
