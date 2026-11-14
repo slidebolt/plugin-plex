@@ -147,24 +147,25 @@ type Sections struct {
 	Directory []Section `json:"Directory"`
 }
 type LibraryMetadata struct {
-	RatingKey        string   `json:"ratingKey"`
-	Key              string   `json:"key"`
-	Type             string   `json:"type"`
-	Title            string   `json:"title"`
-	SortTitle        string   `json:"titleSort"`
-	Summary          string   `json:"summary"`
-	Year             int      `json:"year"`
-	Duration         int64    `json:"duration"`
-	ParentRatingKey  string   `json:"parentRatingKey"`
-	ParentTitle      string   `json:"parentTitle"`
-	GrandparentTitle string   `json:"grandparentTitle"`
-	ParentIndex      int      `json:"parentIndex"`
-	Index            int      `json:"index"`
-	Thumb            string   `json:"thumb"`
-	Art              string   `json:"art"`
-	GUID             string   `json:"guid"`
-	GrandparentGUID  string   `json:"grandparentGuid"`
-	Media            []Airing `json:"Media"`
+	RatingKey             string   `json:"ratingKey"`
+	Key                   string   `json:"key"`
+	Type                  string   `json:"type"`
+	Title                 string   `json:"title"`
+	SortTitle             string   `json:"titleSort"`
+	Summary               string   `json:"summary"`
+	Year                  int      `json:"year"`
+	Duration              int64    `json:"duration"`
+	ParentRatingKey       string   `json:"parentRatingKey"`
+	ParentTitle           string   `json:"parentTitle"`
+	GrandparentTitle      string   `json:"grandparentTitle"`
+	ParentIndex           int      `json:"parentIndex"`
+	Index                 int      `json:"index"`
+	Thumb                 string   `json:"thumb"`
+	Art                   string   `json:"art"`
+	GUID                  string   `json:"guid"`
+	GrandparentGUID       string   `json:"grandparentGuid"`
+	OriginallyAvailableAt string   `json:"originallyAvailableAt"`
+	Media                 []Airing `json:"Media"`
 }
 type MetadataPage struct {
 	Size      int               `json:"size"`

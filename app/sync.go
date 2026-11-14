@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/url"
 	"strconv"
@@ -34,7 +35,7 @@ func (a *App) syncClients(ctx context.Context, s *plexServer) {
 			continue
 		}
 		_ = a.store.Save(domain.Device{ID: id, Plugin: PluginID, Name: client.Name})
-		_ = a.store.Save(domain.Entity{ID: "player", Plugin: PluginID, DeviceID: id, Type: "media_player", Name: client.Name, Commands: []string{"media_play", "media_pause", "media_stop", "media_play_item", "media_seek"}, State: domain.MediaPlayer{State: "idle", ServerID: s.ID, Available: true}})
+		_ = a.store.Save(domain.Entity{ID: "player", Plugin: PluginID, DeviceID: id, Type: "media_player", Name: client.Name, Commands: []string{"media_play", "media_pause", "media_stop", "media_seek"}, State: domain.MediaPlayer{State: "idle", ServerID: s.ID, Available: true}})
 	}
 }
 
@@ -64,6 +65,7 @@ func (a *App) syncDVR(ctx context.Context, s *plexServer, now time.Time) {
 		log.Printf("plugin-plex: server %s has no DVR", s.ID)
 		return
 	}
+	_ = a.store.Save(domain.Entity{ID: "recorder", Plugin: PluginID, DeviceID: s.ID, Type: "recorder", Name: "Plex DVR", Commands: []string{"record_start", "record_cancel", "recording_rule_create", "recording_rule_delete"}, State: domain.Recorder{Status: "idle"}})
 	var providers plex.Container[plex.Providers]
 	if err := s.Client.Get(ctx, "/media/providers", nil, &providers); err == nil {
 		for _, p := range providers.MediaContainer.MediaProvider {
@@ -98,7 +100,7 @@ func (a *App) syncDVR(ctx context.Context, s *plexServer, now time.Time) {
 	}
 	for id, ch := range s.Channels {
 		state := channelState(ch, s.Programs[id], now, s.GuideAt)
-		_ = a.store.Save(domain.Entity{ID: "channel-" + safeID(ch.VCN), Plugin: PluginID, DeviceID: s.ID, Type: "tv_channel", Name: strings.TrimSpace(ch.VCN + " " + ch.Title), Commands: []string{"tv_record_current", "tv_record_airing", "tv_record_series"}, State: state})
+		_ = a.store.Save(domain.Entity{ID: "channel-" + safeID(ch.VCN), Plugin: PluginID, DeviceID: s.ID, Type: "tv_channel", Name: strings.TrimSpace(ch.VCN + " " + ch.Title), State: state})
 	}
 	a.syncSubscriptions(ctx, s)
 }
@@ -187,7 +189,8 @@ func (a *App) syncSubscriptions(ctx context.Context, s *plexServer) {
 	}
 	for _, sub := range subscriptions.MediaContainer.MediaSubscription {
 		id := "rule-" + safeID(sub.Key)
-		_ = a.store.Save(domain.Entity{ID: id, Plugin: PluginID, DeviceID: s.ID, Type: "tv_recording_rule", Name: sub.Title, Commands: []string{"tv_record_cancel"}, State: domain.TVRecordingRule{Enabled: true, Title: sub.Title, Provider: PluginID, ExternalID: sub.Key}})
+		external, _ := json.Marshal(sub.Key)
+		_ = a.store.Save(domain.Entity{ID: id, Plugin: PluginID, DeviceID: s.ID, Type: "recording_rule", Name: sub.Title, State: domain.RecordingRule{Enabled: true, Query: domain.MediaQuery{Title: sub.Title, Attributes: map[string]json.RawMessage{"externalID": external}}, Selection: "all", Recorder: PluginID + "." + s.ID + ".recorder"}})
 	}
 	var scheduled plex.Container[plex.Grabs]
 	if err := s.Client.Get(ctx, "/media/subscriptions/scheduled", nil, &scheduled); err != nil {
@@ -199,7 +202,10 @@ func (a *App) syncSubscriptions(ctx context.Context, s *plexServer) {
 			continue
 		}
 		p := tvProgram(s.ID, m, m.Media[0])
-		ch := domain.TVChannel{Number: m.Media[0].ChannelVCN, Name: m.Media[0].ChannelTitle, Available: true}
-		_ = a.store.Save(domain.Entity{ID: "recording-" + safeID(p.AiringID), Plugin: PluginID, DeviceID: s.ID, Type: "tv_recording", Name: p.Title, Commands: []string{"tv_record_cancel"}, State: domain.TVRecording{Status: grab.Status, Provider: PluginID, ExternalID: strconv.Itoa(grab.MediaSubscriptionID), Channel: ch, Program: p, StartsAt: p.StartsAt, EndsAt: p.EndsAt}})
+		input, _ := json.Marshal(domain.RecordStart{Source: domain.PlayableSource{Kind: "live", Entity: PluginID + "." + s.ID + ".channel-" + safeID(m.Media[0].ChannelVCN)}, Metadata: map[string]json.RawMessage{"program": mustJSON(p), "externalID": mustJSON(strconv.Itoa(grab.MediaSubscriptionID))}})
+		schedule := domain.Schedule{Enabled: grab.Status != "canceled", Steps: []domain.ScheduleStep{{ID: "start", Trigger: domain.Trigger{Kind: "at", At: &p.StartsAt}, Actions: []domain.Action{{Target: PluginID + "." + s.ID + ".recorder", Command: "record_start", Input: input}}}, {ID: "stop", Trigger: domain.Trigger{Kind: "at", At: &p.EndsAt}, Actions: []domain.Action{{Target: PluginID + "." + s.ID + ".recorder", Command: "record_stop"}}}}}
+		_ = a.store.Save(domain.Entity{ID: "recording-" + safeID(p.AiringID), Plugin: PluginID, DeviceID: s.ID, Type: "schedule", Name: p.Title, State: schedule})
 	}
 }
+
+func mustJSON(value any) json.RawMessage { data, _ := json.Marshal(value); return data }

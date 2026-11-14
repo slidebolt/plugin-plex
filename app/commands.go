@@ -21,19 +21,57 @@ func (a *App) handleCommand(addr messenger.Address, cmd any) {
 		go a.connect()
 	case domain.MediaProviderDisconnect:
 		a.disconnect()
-	case domain.TVRecordCurrent:
-		a.recordCurrent(addr)
-	case domain.TVRecordAiring:
-		a.recordAiring(addr.DeviceID, c.AiringID, false, false)
-	case domain.TVRecordSeries:
-		a.recordAiring(addr.DeviceID, c.AiringID, true, c.NewOnly && !c.IncludeRepeats)
-	case domain.TVRecordCancel:
-		a.cancelRecording(addr)
-	case domain.MediaPlay, domain.MediaPause, domain.MediaStop, domain.MediaSeek, domain.MediaPlayItem:
+	case domain.RecordStart:
+		var airingID string
+		_ = json.Unmarshal(c.Metadata["airingID"], &airingID)
+		if airingID != "" {
+			a.recordAiring(addr.DeviceID, airingID, false, false)
+		}
+	case domain.RecordCancel:
+		if c.Reference != "" {
+			a.cancelExternal(addr.DeviceID, c.Reference)
+		}
+	case domain.RecordingRuleCreate:
+		a.createRecordingRule(addr.DeviceID, c)
+	case domain.RecordingRuleDelete:
+		if c.Reference != "" {
+			a.cancelExternal(addr.DeviceID, c.Reference)
+		}
+	case domain.MediaPlay, domain.MediaPause, domain.MediaStop, domain.MediaSeek:
 		// Plex playback requires selecting a specific advertised client. Entities
 		// are still command-capable; unsupported clients remain unchanged rather
 		// than leaking their private control URI into state.
 	}
+}
+
+func (a *App) createRecordingRule(serverID string, cmd domain.RecordingRuleCreate) {
+	s := a.server(serverID)
+	if s == nil {
+		return
+	}
+	var airingID string
+	var series, newOnly bool
+	_ = json.Unmarshal(cmd.Rule.Query.Attributes["airingID"], &airingID)
+	_ = json.Unmarshal(cmd.Rule.Query.Attributes["series"], &series)
+	_ = json.Unmarshal(cmd.Rule.Query.Attributes["newOnly"], &newOnly)
+	if airingID == "" {
+		a.mu.RLock()
+		for id, airing := range s.Airings {
+			if cmd.Rule.Query.Title == "" || strings.EqualFold(airing.Metadata.Title, cmd.Rule.Query.Title) {
+				airingID = id
+				break
+			}
+		}
+		a.mu.RUnlock()
+	}
+	if airingID == "" {
+		log.Printf("plugin-plex: no airing matches recording rule %q", cmd.Rule.Query.Title)
+		return
+	}
+	if cmd.Rule.Selection == "all" {
+		series = true
+	}
+	go a.recordAiring(serverID, airingID, series, newOnly)
 }
 
 func (a *App) recordCurrent(addr messenger.Address) {
@@ -119,34 +157,10 @@ func (a *App) recordAiring(serverID, airingID string, series, newOnly bool) {
 	a.syncSubscriptions(ctx, s)
 }
 
-func (a *App) cancelRecording(addr messenger.Address) {
-	s := a.server(addr.DeviceID)
+func (a *App) cancelExternal(serverID, external string) {
+	s := a.server(serverID)
 	if s == nil {
 		return
-	}
-	raw, err := a.store.Get(domain.EntityKey{Plugin: PluginID, DeviceID: addr.DeviceID, ID: addr.EntityID})
-	if err != nil {
-		return
-	}
-	var envelope struct {
-		State json.RawMessage `json:"state"`
-	}
-	if json.Unmarshal(raw, &envelope) != nil {
-		return
-	}
-	external := ""
-	var rule domain.TVRecordingRule
-	if json.Unmarshal(envelope.State, &rule) == nil {
-		external = rule.ExternalID
-	}
-	if external == "" {
-		var recording domain.TVRecording
-		if json.Unmarshal(envelope.State, &recording) == nil {
-			external = recording.ExternalID
-		}
-	}
-	if external == "" {
-		external = strings.TrimPrefix(addr.EntityID, "rule-")
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
 	defer cancel()

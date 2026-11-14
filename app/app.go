@@ -59,7 +59,7 @@ type App struct {
 
 func New() *App { return &App{servers: map[string]*plexServer{}} }
 func (a *App) Hello() contract.HelloResponse {
-	return contract.HelloResponse{ID: PluginID, Kind: contract.KindPlugin, ContractVersion: contract.ContractVersion, DependsOn: []string{"messenger", "storage"}, Definitions: contract.DescribePlugin("Plex", "Discovers Plex servers, libraries, sessions, channels, and recording schedules.", "media_library", "media_player", "media_provider_connection", "media_server", "media_session", "tv_channel", "tv_recording", "tv_recording_rule")}
+	return contract.HelloResponse{ID: PluginID, Kind: contract.KindPlugin, ContractVersion: contract.ContractVersion, DependsOn: []string{"messenger", "storage"}, Definitions: contract.DescribePlugin("Plex", "Supplies media catalogs, players, activity, television sources, and generic recording schedules.", "media_library", "media_player", "media_provider_connection", "media_server", "media_session", "recorder", "recording_rule", "schedule", "tv_channel")}
 }
 
 func (a *App) OnStart(deps map[string]json.RawMessage) (json.RawMessage, error) {

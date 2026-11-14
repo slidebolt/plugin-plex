@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"sort"
@@ -73,7 +74,37 @@ func mediaItem(serverID, libraryID string, m plex.LibraryMetadata) media.MediaIt
 		p := domain.MediaItemRef{Provider: PluginID, ServerID: serverID, LibraryID: libraryID, ItemID: plex.EncodeID(m.ParentRatingKey)}
 		parent = &p
 	}
-	return media.MediaItem{Ref: ref, Kind: m.Type, Title: m.Title, SortTitle: m.SortTitle, Summary: m.Summary, Year: m.Year, DurationMS: m.Duration, Parent: parent, ParentTitle: firstNonempty(m.ParentTitle, m.GrandparentTitle), Season: m.ParentIndex, Episode: m.Index, Playable: m.Type != "show" && m.Type != "season" && m.Type != "artist" && m.Type != "album", HasThumbnail: m.Thumb != "", HasArt: m.Art != ""}
+	metadata := map[string]json.RawMessage{}
+	putMetadata(metadata, "sortTitle", m.SortTitle)
+	putMetadata(metadata, "description", m.Summary)
+	putMetadata(metadata, "year", m.Year)
+	putMetadata(metadata, "parentTitle", firstNonempty(m.ParentTitle, m.GrandparentTitle))
+	putMetadata(metadata, "season", m.ParentIndex)
+	putMetadata(metadata, "episode", m.Index)
+	putMetadata(metadata, "availableAt", m.OriginallyAvailableAt)
+	assets := []domain.MediaAsset{}
+	if m.Thumb != "" {
+		assets = append(assets, domain.MediaAsset{Kind: "thumbnail", Ref: "thumb"})
+	}
+	if m.Art != "" {
+		assets = append(assets, domain.MediaAsset{Kind: "art", Ref: "art"})
+	}
+	return media.MediaItem{Ref: ref, Kind: m.Type, Title: m.Title, DurationMS: m.Duration, Parent: parent, Playable: m.Type != "show" && m.Type != "season" && m.Type != "artist" && m.Type != "album", Metadata: metadata, Assets: assets}
+}
+
+func putMetadata(metadata map[string]json.RawMessage, key string, value any) {
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return
+		}
+	case int:
+		if v == 0 {
+			return
+		}
+	}
+	b, _ := json.Marshal(value)
+	metadata[key] = b
 }
 
 func (a *App) Artwork(req media.ArtworkRequest) media.ArtworkReply {
@@ -107,6 +138,13 @@ func (a *App) Artwork(req media.ArtworkRequest) media.ArtworkReply {
 		return media.ArtworkReply{Error: err.Error()}
 	}
 	return media.ArtworkReply{Data: b, ContentType: contentType}
+}
+
+func (a *App) Resolve(req media.ResolveRequest) media.ResolveReply {
+	if req.Source.Item == nil || req.Source.Item.Provider != PluginID {
+		return media.ResolveReply{Error: "Plex resolves its own media items only"}
+	}
+	return media.ResolveReply{Error: "Plex playback is controlled through its advertised player, not a public source URL"}
 }
 
 func (a *App) Guide(req media.GuideRequest) media.GuidePage {
