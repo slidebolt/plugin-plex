@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -28,6 +29,25 @@ func TestResourcesSendsPlexIdentityAndKeepsTokenOutOfURL(t *testing.T) {
 	}
 	if len(resources) != 1 || resources[0].ClientIdentifier != "server-id" {
 		t.Fatalf("resources = %#v", resources)
+	}
+}
+
+func TestPlayerCommandUsesTargetHeaderAndKeepsTokenOutOfURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/player/playback/playMedia" || r.URL.Query().Get("key") != "/library/metadata/42" {
+			t.Fatalf("request = %s", r.URL.String())
+		}
+		if r.URL.Query().Get("X-Plex-Token") != "" {
+			t.Fatal("token leaked into URL")
+		}
+		if r.Header.Get("X-Plex-Token") != "secret" || r.Header.Get("X-Plex-Target-Client-Identifier") != "player-id" {
+			t.Fatalf("headers = %#v", r.Header)
+		}
+	}))
+	defer server.Close()
+	err := New(server.URL, "secret", "controller").PlayerCommand(context.Background(), "player-id", "/player/playback/playMedia", url.Values{"key": {"/library/metadata/42"}})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

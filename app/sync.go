@@ -29,14 +29,19 @@ func (a *App) syncClients(ctx context.Context, s *plexServer) {
 	if err := s.Client.Get(ctx, "/clients", nil, &result); err != nil {
 		return
 	}
+	clients := make(map[string]plex.PlexClient, len(result.MediaContainer.Server))
 	for _, client := range result.MediaContainer.Server {
 		id := "player-" + safeID(client.MachineIdentifier)
 		if id == "player-" {
 			continue
 		}
+		clients[id] = client
 		_ = a.store.Save(domain.Device{ID: id, Plugin: PluginID, Name: client.Name})
 		_ = a.store.Save(domain.Entity{ID: "player", Plugin: PluginID, DeviceID: id, Type: "media_player", Name: client.Name, Commands: []string{"media_play", "media_pause", "media_stop", "media_seek"}, State: domain.MediaPlayer{State: "idle", ServerID: s.ID, Available: true}})
 	}
+	a.mu.Lock()
+	s.Clients = clients
+	a.mu.Unlock()
 }
 
 func (a *App) syncSessions(ctx context.Context, s *plexServer) {

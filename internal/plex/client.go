@@ -26,6 +26,10 @@ func New(baseURL, token, clientID string) *Client {
 }
 
 func (c *Client) request(ctx context.Context, method, path string, query url.Values, body io.Reader, out any) error {
+	return c.requestTarget(ctx, method, path, query, body, out, "")
+}
+
+func (c *Client) requestTarget(ctx context.Context, method, path string, query url.Values, body io.Reader, out any, target string) error {
 	u := c.BaseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -37,6 +41,9 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Plex-Product", Product)
 	req.Header.Set("X-Plex-Client-Identifier", c.ClientID)
+	if target != "" {
+		req.Header.Set("X-Plex-Target-Client-Identifier", target)
+	}
 	if c.Token != "" {
 		req.Header.Set("X-Plex-Token", c.Token)
 	}
@@ -53,6 +60,12 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// PlayerCommand sends a Plex Companion command through the media server. The
+// server forwards it to the advertised player identified by target.
+func (c *Client) PlayerCommand(ctx context.Context, target, path string, query url.Values) error {
+	return c.requestTarget(ctx, http.MethodGet, path, query, nil, nil, target)
 }
 
 func (c *Client) Get(ctx context.Context, path string, query url.Values, out any) error {

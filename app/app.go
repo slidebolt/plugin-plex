@@ -41,6 +41,7 @@ type plexServer struct {
 	Channels     map[string]plex.Channel
 	Programs     map[string][]domain.TVProgram
 	Airings      map[string]airingRecord
+	Clients      map[string]plex.PlexClient
 	GuideAt      time.Time
 }
 
@@ -236,10 +237,10 @@ func (a *App) reconcile(ctx context.Context) {
 		}
 		id := safeID(resource.ClientIdentifier)
 		seen[id] = true
-		s := &plexServer{ID: id, Resource: resource, Client: plex.New(base, auth.Token, auth.ClientID), Libraries: map[string]plex.Section{}, Channels: map[string]plex.Channel{}, Programs: map[string][]domain.TVProgram{}, Airings: map[string]airingRecord{}}
+		s := &plexServer{ID: id, Resource: resource, Client: plex.New(base, auth.Token, auth.ClientID), Libraries: map[string]plex.Section{}, Channels: map[string]plex.Channel{}, Programs: map[string][]domain.TVProgram{}, Airings: map[string]airingRecord{}, Clients: map[string]plex.PlexClient{}}
 		a.mu.Lock()
 		if old := a.servers[id]; old != nil {
-			s.GuideAt, s.Programs, s.Airings, s.Channels, s.ProviderPath = old.GuideAt, old.Programs, old.Airings, old.Channels, old.ProviderPath
+			s.GuideAt, s.Programs, s.Airings, s.Channels, s.ProviderPath, s.Clients = old.GuideAt, old.Programs, old.Airings, old.Channels, old.ProviderPath, old.Clients
 		}
 		a.servers[id] = s
 		a.mu.Unlock()

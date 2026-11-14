@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/slidebolt/plugin-plex/internal/plex"
@@ -38,10 +39,129 @@ func (a *App) handleCommand(addr messenger.Address, cmd any) {
 			a.cancelExternal(addr.DeviceID, c.Reference)
 		}
 	case domain.MediaPlay, domain.MediaPause, domain.MediaStop, domain.MediaSeek:
-		// Plex playback requires selecting a specific advertised client. Entities
-		// are still command-capable; unsupported clients remain unchanged rather
-		// than leaking their private control URI into state.
+		if err := a.controlPlayer(addr, cmd); err != nil {
+			log.Printf("plugin-plex: control player %s: %v", addr.Key(), err)
+		}
 	}
+}
+
+var playerCommandID atomic.Uint64
+
+func (a *App) controlPlayer(addr messenger.Address, command any) error {
+	s, client := a.findPlayer(addr.DeviceID)
+	if s == nil || client == nil {
+		return fmt.Errorf("Plex player is not available")
+	}
+	query := url.Values{"commandID": {strconv.FormatUint(playerCommandID.Add(1), 10)}}
+	path := ""
+	state := "idle"
+	var item *domain.MediaItemRef
+	var position int64
+	switch cmd := command.(type) {
+	case domain.MediaPlay:
+		path = "/player/playback/play"
+		state = "playing"
+		position = cmd.PositionMS
+		if cmd.Source != nil && cmd.Source.Item != nil {
+			playQuery, err := playMediaQuery(s, *cmd.Source.Item, cmd.PositionMS)
+			if err != nil {
+				return err
+			}
+			for key, values := range playQuery {
+				query[key] = values
+			}
+			path = "/player/playback/playMedia"
+			item = cmd.Source.Item
+		}
+	case domain.MediaPause:
+		path, state = "/player/playback/pause", "paused"
+	case domain.MediaStop:
+		path, state = "/player/playback/stop", "idle"
+	case domain.MediaSeek:
+		path, state, position = "/player/playback/seekTo", "playing", cmd.PositionMS
+		query.Set("offset", strconv.FormatInt(cmd.PositionMS, 10))
+	default:
+		return fmt.Errorf("unsupported player command %T", command)
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	if err := s.Client.PlayerCommand(ctx, client.MachineIdentifier, path, query); err != nil {
+		return err
+	}
+	return a.updatePlayerState(addr, state, position, item)
+}
+
+func playMediaQuery(s *plexServer, item domain.MediaItemRef, positionMS int64) (url.Values, error) {
+	if item.Provider != PluginID || item.ServerID != s.ID {
+		return nil, fmt.Errorf("Plex player requires an item from its Plex server")
+	}
+	id, err := plex.DecodeID(item.ItemID)
+	if err != nil {
+		return nil, fmt.Errorf("decode media item: %w", err)
+	}
+	serverURL, err := url.Parse(s.Client.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	port := serverURL.Port()
+	if port == "" {
+		if serverURL.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	key := "/library/metadata/" + id
+	mediaType := "video"
+	if library, ok := s.Libraries[item.LibraryID]; ok {
+		switch library.Type {
+		case "artist", "album", "track", "music":
+			mediaType = "audio"
+		case "photo", "image":
+			mediaType = "photo"
+		}
+	}
+	return url.Values{
+		"key":               {key},
+		"path":              {key},
+		"machineIdentifier": {s.Resource.ClientIdentifier},
+		"address":           {serverURL.Hostname()},
+		"port":              {port},
+		"protocol":          {serverURL.Scheme},
+		"offset":            {strconv.FormatInt(positionMS, 10)},
+		"type":              {mediaType},
+	}, nil
+}
+
+func (a *App) findPlayer(deviceID string) (*plexServer, *plex.PlexClient) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, s := range a.servers {
+		if client, ok := s.Clients[deviceID]; ok {
+			copy := client
+			return s, &copy
+		}
+	}
+	return nil, nil
+}
+
+func (a *App) updatePlayerState(addr messenger.Address, state string, position int64, item *domain.MediaItemRef) error {
+	key := domain.EntityKey{Plugin: addr.Plugin, DeviceID: addr.DeviceID, ID: addr.EntityID}
+	raw, err := a.store.Get(key)
+	if err != nil {
+		return err
+	}
+	var entity domain.Entity
+	if err := json.Unmarshal(raw, &entity); err != nil {
+		return err
+	}
+	player, _ := entity.State.(domain.MediaPlayer)
+	player.State, player.PositionMS, player.LastError = state, position, ""
+	if item != nil {
+		player.Item = item
+	}
+	entity.State = player
+	return a.store.Save(entity)
 }
 
 func (a *App) createRecordingRule(serverID string, cmd domain.RecordingRuleCreate) {
