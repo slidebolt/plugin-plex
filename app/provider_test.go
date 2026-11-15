@@ -36,3 +36,27 @@ func TestAccountDeviceHasEmptyEntityArray(t *testing.T) {
 		t.Fatal("account device entities must serialize as an empty array")
 	}
 }
+
+func TestSubscriptionQueryUsesProviderTargetInsteadOfTemplateTitle(t *testing.T) {
+	subscription := plex.Subscription{
+		Key: "42", Type: 2, Title: "All Episodes", TargetLibrarySectionID: 7,
+		Directory: &plex.SubscriptionDirectory{GUID: "plex://show/example", Title: "Example Show", Type: "show", Thumb: "https://media.example/thumb.jpg"},
+	}
+	name, query := subscriptionQuery("server", subscription)
+	if name != "Example Show" || query.Title != "Example Show" || query.Kind != "show" {
+		t.Fatalf("name/query = %q / %#v", name, query)
+	}
+	if query.Item == nil || query.Item.Provider != PluginID || query.Item.ServerID != "server" || query.Item.LibraryID != "7" {
+		t.Fatalf("item = %#v", query.Item)
+	}
+	if len(query.Attributes["thumbnail"]) == 0 {
+		t.Fatal("thumbnail was not preserved")
+	}
+}
+
+func TestSubscriptionQueryFallsBackWhenProviderOmitsTarget(t *testing.T) {
+	name, query := subscriptionQuery("server", plex.Subscription{Title: "Single Recording"})
+	if name != "Single Recording" || query.Title != "Single Recording" || query.Item != nil {
+		t.Fatalf("name/query = %q / %#v", name, query)
+	}
+}

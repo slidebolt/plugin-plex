@@ -11,6 +11,7 @@ import (
 
 	"github.com/slidebolt/plugin-plex/internal/plex"
 	domain "github.com/slidebolt/sb-domain"
+	storage "github.com/slidebolt/sb-storage-sdk"
 )
 
 func (a *App) syncLibraries(ctx context.Context, s *plexServer, now time.Time) {
@@ -49,6 +50,7 @@ func (a *App) syncSessions(ctx context.Context, s *plexServer) {
 	if err := s.Client.Get(ctx, "/status/sessions", nil, &result); err != nil {
 		return
 	}
+	items := make([]storage.Keyed, 0, len(result.MediaContainer.Metadata))
 	for _, session := range result.MediaContainer.Metadata {
 		id := session.Session.ID
 		if id == "" {
@@ -56,7 +58,15 @@ func (a *App) syncSessions(ctx context.Context, s *plexServer) {
 		}
 		id = "session-" + safeID(id)
 		ref := mediaRef(s.ID, "", session.LibraryMetadata)
-		_ = a.store.Save(domain.Entity{ID: id, Plugin: PluginID, DeviceID: s.ID, Type: "media_session", Name: session.Title, State: domain.MediaSession{ServerID: s.ID, PlayerID: session.Player.MachineIdentifier, User: session.User.Title, Item: &ref, Title: session.Title, State: session.Player.State, PositionMS: session.ViewOffset, DurationMS: session.Duration}})
+		playerID := "player-" + safeID(session.Player.MachineIdentifier)
+		playerRef := ""
+		if playerID != "player-" {
+			playerRef = PluginID + "." + playerID + ".player"
+		}
+		items = append(items, a.healthyEntity(domain.Entity{ID: id, Plugin: PluginID, DeviceID: s.ID, Type: "media_session", Name: session.Title, State: domain.MediaSession{ServerID: s.ID, PlayerID: playerRef, User: session.User.Title, Item: &ref, Title: session.Title, State: session.Player.State, PositionMS: session.ViewOffset, DurationMS: session.Duration}}))
+	}
+	if _, err := storage.ReconcileSnapshot(a.store, storage.Snapshot{Pattern: PluginID + "." + s.ID + ".session-*", Items: items, OnMissing: storage.MissingDelete}); err != nil {
+		log.Printf("plugin-plex: reconcile sessions for %s: %v", s.ID, err)
 	}
 }
 
@@ -192,15 +202,35 @@ func (a *App) syncSubscriptions(ctx context.Context, s *plexServer) {
 	if err := s.Client.Get(ctx, "/media/subscriptions", url.Values{"includeGrabs": {"1"}}, &subscriptions); err != nil {
 		return
 	}
+	rules := make([]storage.Keyed, 0, len(subscriptions.MediaContainer.MediaSubscription))
 	for _, sub := range subscriptions.MediaContainer.MediaSubscription {
 		id := "rule-" + safeID(sub.Key)
 		external, _ := json.Marshal(sub.Key)
-		_ = a.store.Save(domain.Entity{ID: id, Plugin: PluginID, DeviceID: s.ID, Type: "recording_rule", Name: sub.Title, State: domain.RecordingRule{Enabled: true, Query: domain.MediaQuery{Title: sub.Title, Attributes: map[string]json.RawMessage{"externalID": external}}, Selection: "all", Recorder: PluginID + "." + s.ID + ".recorder"}})
+		name, query := subscriptionQuery(s.ID, sub)
+		attributes := query.Attributes
+		if attributes == nil {
+			attributes = map[string]json.RawMessage{}
+		}
+		attributes["externalID"] = external
+		if sub.AiringsType != "" {
+			attributes["airingsType"] = mustJSON(sub.AiringsType)
+		}
+		query.Attributes = attributes
+		selection := "one"
+		if sub.Type == 2 {
+			selection = "all"
+		}
+		rules = append(rules, a.healthyEntity(domain.Entity{ID: id, Plugin: PluginID, DeviceID: s.ID, Type: "recording_rule", Name: name, Commands: []string{"recording_rule_delete"}, State: domain.RecordingRule{Enabled: true, Query: query, Selection: selection, Recorder: PluginID + "." + s.ID + ".recorder"}}))
+	}
+	if _, err := storage.ReconcileSnapshot(a.store, storage.Snapshot{Pattern: PluginID + "." + s.ID + ".rule-*", Items: rules, OnMissing: storage.MissingDelete}); err != nil {
+		log.Printf("plugin-plex: reconcile recording rules for %s: %v", s.ID, err)
+		return
 	}
 	var scheduled plex.Container[plex.Grabs]
 	if err := s.Client.Get(ctx, "/media/subscriptions/scheduled", nil, &scheduled); err != nil {
 		return
 	}
+	schedules := make([]storage.Keyed, 0, len(scheduled.MediaContainer.MediaGrabOperation))
 	for _, grab := range scheduled.MediaContainer.MediaGrabOperation {
 		m := grab.Metadata
 		if len(m.Media) == 0 {
@@ -209,8 +239,33 @@ func (a *App) syncSubscriptions(ctx context.Context, s *plexServer) {
 		p := tvProgram(s.ID, m, m.Media[0])
 		input, _ := json.Marshal(domain.RecordStart{Source: domain.PlayableSource{Kind: "live", Entity: PluginID + "." + s.ID + ".channel-" + safeID(m.Media[0].ChannelVCN)}, Metadata: map[string]json.RawMessage{"program": mustJSON(p), "externalID": mustJSON(strconv.Itoa(grab.MediaSubscriptionID))}})
 		schedule := domain.Schedule{Enabled: grab.Status != "canceled", Steps: []domain.ScheduleStep{{ID: "start", Trigger: domain.Trigger{Kind: "at", At: &p.StartsAt}, Actions: []domain.Action{{Target: PluginID + "." + s.ID + ".recorder", Command: "record_start", Input: input}}}, {ID: "stop", Trigger: domain.Trigger{Kind: "at", At: &p.EndsAt}, Actions: []domain.Action{{Target: PluginID + "." + s.ID + ".recorder", Command: "record_stop"}}}}}
-		_ = a.store.Save(domain.Entity{ID: "recording-" + safeID(p.AiringID), Plugin: PluginID, DeviceID: s.ID, Type: "schedule", Name: p.Title, State: schedule})
+		schedules = append(schedules, a.healthyEntity(domain.Entity{ID: "recording-" + safeID(p.AiringID), Plugin: PluginID, DeviceID: s.ID, Type: "schedule", Name: p.Title, State: schedule}))
 	}
+	if _, err := storage.ReconcileSnapshot(a.store, storage.Snapshot{Pattern: PluginID + "." + s.ID + ".recording-*", Items: schedules, OnMissing: storage.MissingDelete}); err != nil {
+		log.Printf("plugin-plex: reconcile scheduled recordings for %s: %v", s.ID, err)
+	}
+}
+
+func subscriptionQuery(serverID string, sub plex.Subscription) (string, domain.MediaQuery) {
+	name := strings.TrimSpace(sub.Title)
+	query := domain.MediaQuery{}
+	if sub.Directory == nil {
+		query.Title = name
+		return name, query
+	}
+	if strings.TrimSpace(sub.Directory.Title) != "" {
+		name = strings.TrimSpace(sub.Directory.Title)
+	}
+	query.Kind = sub.Directory.Type
+	query.Title = name
+	providerID := firstNonempty(sub.Directory.GUID, sub.Directory.RatingKey)
+	if providerID != "" {
+		query.Item = &domain.MediaItemRef{Provider: PluginID, ServerID: serverID, LibraryID: strconv.Itoa(sub.TargetLibrarySectionID), ItemID: plex.EncodeID(providerID)}
+	}
+	if sub.Directory.Thumb != "" {
+		query.Attributes = map[string]json.RawMessage{"thumbnail": mustJSON(sub.Directory.Thumb)}
+	}
+	return name, query
 }
 
 func mustJSON(value any) json.RawMessage { data, _ := json.Marshal(value); return data }

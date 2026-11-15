@@ -60,7 +60,13 @@ type App struct {
 
 func New() *App { return &App{servers: map[string]*plexServer{}} }
 func (a *App) Hello() contract.HelloResponse {
-	return contract.HelloResponse{ID: PluginID, Kind: contract.KindPlugin, ContractVersion: contract.ContractVersion, DependsOn: []string{"messenger", "storage"}, Definitions: contract.DescribePlugin("Plex", "Supplies media catalogs, players, activity, television sources, and generic recording schedules.", "media_library", "media_player", "media_provider_connection", "media_server", "media_session", "recorder", "recording_rule", "schedule", "tv_channel"), Setup: contract.SelectableSetup("Media", contract.SetupField{Key: "refresh_interval", Environment: "PLEX_REFRESH_INTERVAL", Name: "Refresh interval", Description: "Minimum interval between Plex inventory refreshes.", Control: contract.SetupText, Advanced: true, Default: json.RawMessage(`"5m"`)})}
+	definitions := contract.DescribePlugin("Plex", "Supplies media catalogs, players, activity, television sources, and generic recording schedules.", "media_library", "media_player", "media_provider_connection", "media_server", "media_session", "recorder", "recording_rule", "schedule", "tv_channel")
+	definitions.Collections = []contract.CollectionDefinition{
+		{ID: "sessions", Name: "Playback sessions", Description: "Playback that is active on the media server now.", EntityTypes: []string{"media_session"}, Mode: contract.CollectionAuthoritativeSnapshot, OnMissing: contract.CollectionMissingDelete},
+		{ID: "recording-rules", Name: "Recording rules", Description: "Provider-owned rules that select future media for recording.", EntityTypes: []string{"recording_rule"}, Mode: contract.CollectionAuthoritativeSnapshot, OnMissing: contract.CollectionMissingDelete},
+		{ID: "scheduled-recordings", Name: "Scheduled recordings", Description: "Concrete future recordings produced by recording rules.", EntityTypes: []string{"schedule"}, Mode: contract.CollectionAuthoritativeSnapshot, OnMissing: contract.CollectionMissingDelete},
+	}
+	return contract.HelloResponse{ID: PluginID, Kind: contract.KindPlugin, ContractVersion: contract.ContractVersion, DependsOn: []string{"messenger", "storage"}, Definitions: definitions, Setup: contract.SelectableSetup("Media", contract.SetupField{Key: "refresh_interval", Environment: "PLEX_REFRESH_INTERVAL", Name: "Refresh interval", Description: "Minimum interval between Plex inventory refreshes.", Control: contract.SetupText, Advanced: true, Default: json.RawMessage(`"5m"`)})}
 }
 
 func (a *App) OnStart(deps map[string]json.RawMessage) (json.RawMessage, error) {

@@ -260,11 +260,21 @@ type Providers struct {
 	MediaProvider []Provider `json:"MediaProvider"`
 }
 type Subscription struct {
-	Key                    string    `json:"key"`
-	Type                   int       `json:"type"`
-	Title                  string    `json:"title"`
-	TargetLibrarySectionID int       `json:"targetLibrarySectionID"`
-	Setting                []Setting `json:"Setting"`
+	Key                    string                 `json:"key"`
+	Type                   int                    `json:"type"`
+	Title                  string                 `json:"title"`
+	AiringsType            string                 `json:"airingsType"`
+	TargetLibrarySectionID int                    `json:"targetLibrarySectionID"`
+	Setting                []Setting              `json:"Setting"`
+	Directory              *SubscriptionDirectory `json:"Directory"`
+}
+type SubscriptionDirectory struct {
+	GUID            string `json:"guid"`
+	RatingKey       string `json:"ratingKey"`
+	Title           string `json:"title"`
+	Type            string `json:"type"`
+	Thumb           string `json:"thumb"`
+	MediaProviderID string `json:"mediaProviderID"`
 }
 type Setting struct {
 	ID    string `json:"id"`

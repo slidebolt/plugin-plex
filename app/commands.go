@@ -35,8 +35,12 @@ func (a *App) handleCommand(addr messenger.Address, cmd any) {
 	case domain.RecordingRuleCreate:
 		a.createRecordingRule(addr.DeviceID, c)
 	case domain.RecordingRuleDelete:
-		if c.Reference != "" {
-			a.cancelExternal(addr.DeviceID, c.Reference)
+		reference := c.Reference
+		if reference == "" && strings.HasPrefix(addr.EntityID, "rule-") {
+			reference = strings.TrimPrefix(addr.EntityID, "rule-")
+		}
+		if reference != "" {
+			a.cancelExternal(addr.DeviceID, reference)
 		}
 	case domain.MediaPlay, domain.MediaPause, domain.MediaStop, domain.MediaSeek:
 		if err := a.controlPlayer(addr, cmd); err != nil {
