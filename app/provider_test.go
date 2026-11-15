@@ -7,6 +7,7 @@ import (
 
 	"github.com/slidebolt/plugin-plex/internal/plex"
 	domain "github.com/slidebolt/sb-domain"
+	media "github.com/slidebolt/sb-media-sdk"
 )
 
 func TestTVProgramMapsAiringWithoutCredentials(t *testing.T) {
@@ -17,6 +18,33 @@ func TestTVProgramMapsAiringWithoutCredentials(t *testing.T) {
 	}
 	if p.ProviderRef == nil || p.ProviderRef.Provider != PluginID || p.ProviderRef.ServerID != "server" {
 		t.Fatalf("provider ref = %#v", p.ProviderRef)
+	}
+}
+
+func TestCatalogPathTranslatesShowEpisodeBrowse(t *testing.T) {
+	showID := plex.EncodeID("2543")
+	path, err := catalogPath(media.CatalogRequest{LibraryID: "2", ParentID: showID, Kind: "episode"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/library/metadata/2543/allLeaves" {
+		t.Fatalf("path = %q", path)
+	}
+}
+
+func TestCatalogPathUsesDirectChildrenForGenericContainers(t *testing.T) {
+	path, err := catalogPath(media.CatalogRequest{LibraryID: "2", ParentID: plex.EncodeID("42")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/library/metadata/42/children" {
+		t.Fatalf("path = %q", path)
+	}
+}
+
+func TestPlexItemTypeTranslatesGenericKinds(t *testing.T) {
+	if plexItemType("show") != "2" || plexItemType("episode") != "4" || plexItemType("unknown") != "" {
+		t.Fatal("generic media kinds were not translated to Plex type identifiers")
 	}
 }
 

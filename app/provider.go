@@ -22,13 +22,9 @@ func (a *App) Browse(req media.CatalogRequest) media.CatalogPage {
 	if s == nil {
 		return media.CatalogPage{Error: "media server not found"}
 	}
-	path := "/library/sections/" + url.PathEscape(req.LibraryID) + "/all"
-	if req.ItemID != "" {
-		decoded, err := plex.DecodeID(req.ItemID)
-		if err != nil {
-			return media.CatalogPage{Error: "invalid item ID"}
-		}
-		path = "/library/metadata/" + url.PathEscape(decoded)
+	path, err := catalogPath(req)
+	if err != nil {
+		return media.CatalogPage{Error: err.Error()}
 	}
 	limit := req.Limit
 	if limit <= 0 || limit > 200 {
@@ -39,8 +35,8 @@ func (a *App) Browse(req media.CatalogRequest) media.CatalogPage {
 	if req.Query != "" {
 		q.Set("title", req.Query)
 	}
-	if req.Kind != "" {
-		q.Set("type", req.Kind)
+	if itemType := plexItemType(req.Kind); itemType != "" {
+		q.Set("type", itemType)
 	}
 	var result plex.Container[plex.MetadataPage]
 	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
@@ -61,6 +57,51 @@ func (a *App) Browse(req media.CatalogRequest) media.CatalogPage {
 		next = strconv.Itoa(offset + len(items))
 	}
 	return media.CatalogPage{Items: items, NextCursor: next, Total: total}
+}
+
+func plexItemType(kind string) string {
+	switch strings.ToLower(kind) {
+	case "movie":
+		return "1"
+	case "show", "series":
+		return "2"
+	case "season":
+		return "3"
+	case "episode":
+		return "4"
+	case "artist":
+		return "8"
+	case "album":
+		return "9"
+	case "track", "audio":
+		return "10"
+	case "photo", "image":
+		return "12"
+	default:
+		return ""
+	}
+}
+
+func catalogPath(req media.CatalogRequest) (string, error) {
+	if req.ItemID != "" {
+		decoded, err := plex.DecodeID(req.ItemID)
+		if err != nil {
+			return "", fmt.Errorf("invalid item ID")
+		}
+		return "/library/metadata/" + url.PathEscape(decoded), nil
+	}
+	if req.ParentID != "" {
+		decoded, err := plex.DecodeID(req.ParentID)
+		if err != nil {
+			return "", fmt.Errorf("invalid parent ID")
+		}
+		path := "/library/metadata/" + url.PathEscape(decoded) + "/children"
+		if strings.EqualFold(req.Kind, "episode") {
+			path = "/library/metadata/" + url.PathEscape(decoded) + "/allLeaves"
+		}
+		return path, nil
+	}
+	return "/library/sections/" + url.PathEscape(req.LibraryID) + "/all", nil
 }
 
 func mediaItem(serverID, libraryID string, m plex.LibraryMetadata) media.MediaItem {
