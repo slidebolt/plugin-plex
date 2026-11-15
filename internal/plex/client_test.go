@@ -75,6 +75,17 @@ func TestEncodedIDsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLibraryMetadataSeparatesCanonicalAndExternalGUIDs(t *testing.T) {
+	var metadata LibraryMetadata
+	payload := []byte(`{"ratingKey":"42","guid":"plex://show/example","Guid":[{"id":"external://example"}],"title":"Example Show"}`)
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.GUID != "plex://show/example" || metadata.RatingKey != "42" || metadata.Title != "Example Show" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+}
+
 func TestDVRDistinguishesLineupStringFromLineupArray(t *testing.T) {
 	var result Container[DVRs]
 	raw := []byte(`{"MediaContainer":{"Dvr":[{"key":"2","lineup":"lineup://example","Lineup":[{"key":"enabled"}]}]}}`)

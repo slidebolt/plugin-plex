@@ -180,6 +180,38 @@ type LibraryMetadata struct {
 	OriginallyAvailableAt string   `json:"originallyAvailableAt"`
 	Media                 []Airing `json:"Media"`
 }
+
+// UnmarshalJSON keeps Plex's provider-specific key collision inside this
+// adapter. Detailed metadata can contain both "guid" (the canonical item
+// identifier) and "Guid" (an array of external identifiers). encoding/json
+// matches keys case-insensitively, so the default decoder otherwise attempts
+// to put the external-ID array into GUID's string field.
+func (m *LibraryMetadata) UnmarshalJSON(data []byte) error {
+	type alias LibraryMetadata
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	canonicalGUID := fields["guid"]
+	delete(fields, "guid")
+	delete(fields, "Guid")
+	cleaned, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	var decoded alias
+	if err := json.Unmarshal(cleaned, &decoded); err != nil {
+		return err
+	}
+	*m = LibraryMetadata(decoded)
+	if len(canonicalGUID) > 0 {
+		if err := json.Unmarshal(canonicalGUID, &m.GUID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type MetadataPage struct {
 	Size      int               `json:"size"`
 	TotalSize int               `json:"totalSize"`
