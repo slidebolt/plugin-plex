@@ -37,7 +37,7 @@ func (a *App) syncClients(ctx context.Context, s *plexServer) {
 			continue
 		}
 		clients[id] = client
-		_ = a.store.Save(domain.Device{ID: id, Plugin: PluginID, Name: client.Name})
+		_ = a.store.Save(domain.Device{ID: id, Plugin: PluginID, Class: "media_player", Name: client.Name, SecurityGroups: []string{domain.SecurityGroupMedia}})
 		_ = a.store.Save(domain.Entity{ID: "player", Plugin: PluginID, DeviceID: id, Type: "media_player", Name: client.Name, Commands: []string{"media_play", "media_pause", "media_stop", "media_seek"}, State: domain.MediaPlayer{State: "idle", ServerID: s.ID, Available: true}})
 	}
 	a.mu.Lock()

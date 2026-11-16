@@ -61,6 +61,10 @@ type App struct {
 func New() *App { return &App{servers: map[string]*plexServer{}} }
 func (a *App) Hello() contract.HelloResponse {
 	definitions := contract.DescribePlugin("Plex", "Supplies media catalogs, players, activity, television sources, and generic recording schedules.", "media_library", "media_player", "media_provider_connection", "media_server", "media_session", "recorder", "recording_rule", "schedule", "tv_channel")
+	definitions.DeviceClasses = []contract.DeviceClassDefinition{
+		{Class: "media_server", Name: "Media server", Description: "A Plex server that supplies libraries, television, and sessions.", SecurityGroups: []string{"media"}, EntityTypes: []string{"media_library", "media_server", "media_session", "recorder", "recording_rule", "schedule", "tv_channel"}},
+		{Class: "media_player", Name: "Media player", Description: "A Plex playback client.", SecurityGroups: []string{"media"}, EntityTypes: []string{"media_player", "media_session"}},
+	}
 	definitions.Collections = []contract.CollectionDefinition{
 		{ID: "sessions", Name: "Playback sessions", Description: "Playback that is active on the media server now.", EntityTypes: []string{"media_session"}, Mode: contract.CollectionAuthoritativeSnapshot, OnMissing: contract.CollectionMissingDelete},
 		{ID: "recording-rules", Name: "Recording rules", Description: "Provider-owned rules that select future media for recording.", EntityTypes: []string{"recording_rule"}, Mode: contract.CollectionAuthoritativeSnapshot, OnMissing: contract.CollectionMissingDelete},
@@ -286,7 +290,7 @@ func chooseConnection(ctx context.Context, r plex.Resource, auth authData) strin
 
 func (a *App) syncServer(ctx context.Context, s *plexServer) {
 	now := time.Now().UTC()
-	_ = a.store.Save(a.healthyDevice(domain.Device{ID: s.ID, Plugin: PluginID, Name: s.Resource.Name}))
+	_ = a.store.Save(a.healthyDevice(domain.Device{ID: s.ID, Plugin: PluginID, Class: "media_server", Name: s.Resource.Name, SecurityGroups: []string{domain.SecurityGroupMedia}}))
 	_ = a.store.Save(a.healthyEntity(domain.Entity{ID: "server", Plugin: PluginID, DeviceID: s.ID, Type: "media_server", Name: s.Resource.Name, State: domain.MediaServer{Connected: true, Name: s.Resource.Name, Version: s.Resource.ProductVersion, Owned: s.Resource.Owned, LastSyncAt: &now}}))
 	a.syncLibraries(ctx, s, now)
 	a.syncClients(ctx, s)
